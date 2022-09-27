@@ -1,2 +1,13 @@
 .idea
 venv
+
+__pycache__
+
+signalGenerators/__pycache__
+
+ui/__pycache__
+ui/utils/__pycache__
+ui/headers/__pycache__
+ui/generators/__pycache__
+
+SignalClient/__pycache__

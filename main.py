@@ -9,7 +9,7 @@ import pyximport    # Compile cython and cpp files
 pyximport.install(build_in_temp=False, language_level=3, setup_args={"script_args": ["--cython-cplus"]})
 
 from PyQt5.QtGui import QCloseEvent
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import QMainWindow, QApplication, QFrame, QVBoxLayout, QFileDialog
 
 from ui.headers.ui_MainWindow import Ui_MainWindow
@@ -21,9 +21,13 @@ from ui.utils.SignalPlotter import SignalPlotter
 
 from ui.utils import AddToFrame, RemoveFromFrame
 
+from signalServer import SignalServer
 
-SAMPLERATE = 16000
+
+SAMPLERATE = 8000
 STREAM_BUFFER_SIZE = 1000
+
+SIGNAL_SERVER_PORT = 9999
 
 
 
@@ -34,6 +38,8 @@ class SignalGeneratorApp(QMainWindow):
 
     needUpdateSamples = True
     samples = numpy.zeros(SAMPLERATE)
+
+    samplesGenerated = pyqtSignal(numpy.ndarray)
 
     def __init__(self):
         super().__init__()
@@ -58,13 +64,25 @@ class SignalGeneratorApp(QMainWindow):
         # Инициализация вывода звука
         self.audio = pyaudio.PyAudio()
 
+        # Функция обратного вызова для эвента "Сэмплы сгененрированы"
+        self.samplesGenerated.connect(self.samplesGeneratedCallback)
+
+        # Инициализация сервера сигналов
+        self.server = SignalServer(SIGNAL_SERVER_PORT)
+        self.server.start()
+
         # Список выходов сигнала
         self.deviceIndexes = []
         for i in range(self.audio.get_device_count()):
             dev = self.audio.get_device_info_by_index(i)
 
             if dev.get('hostApi', -1) == 0 and dev.get("maxOutputChannels", 0) > 0:
-                self.ui.outputDevice.addItem(dev.get("name"))
+                if "win" in sys.platform:
+                    name = dev.get("name").encode("cp1251").decode("UTF-8")
+                else:
+                    name = dev.get("name")
+
+                self.ui.outputDevice.addItem(name)
                 self.deviceIndexes.append(dev.get("index"))
 
         self.audioStream = None
@@ -164,6 +182,9 @@ class SignalGeneratorApp(QMainWindow):
 
         self.generatorSettingsChanged()
 
+    def samplesGeneratedCallback(self, samples):
+        self.server.putSamples(SAMPLERATE, samples, numpy.int16)
+
     def generatorSettingsChanged(self):
         # Нулевой сигнал
         samples = numpy.zeros(SAMPLERATE, dtype=float)
@@ -186,6 +207,8 @@ class SignalGeneratorApp(QMainWindow):
 
         # Ограничение сигнала
         samples = samples.clip(-1.0, 1.0)
+
+        self.samplesGenerated.emit((samples * 0x7fff).astype(numpy.int16))
 
         return (samples.astype(numpy.float32), pyaudio.paContinue)
 
